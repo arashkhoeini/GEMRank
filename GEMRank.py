@@ -18,13 +18,97 @@ MOVIE = 1
 RATE = 2
 
 class GEMRank():
+    """
+    Implementation of GEMRank algorithm.
+
+    This class comprises methods to train a GEMRank model and test it in
+    terms of NDCG.
+
+    Attributes
+    ----------
+    embedding_size : int
+        size of item embeddings in the factorization phase
+    hidden_layer_size: int
+        number of neurons in the hidden layer of MLP in the
+        second phase
+    users_size: int
+        number of users in dataset. For movielens 100k its 943 and for
+        movielens 1m its 6040.
+    epoch_number: int
+        number of epochs in the neural network training
+    user_user: bool, optional
+        this indicates the type of matrix which we will factorize in
+        the first phase. If it be True the matrix will be user-user and
+        if it be False it will be item-item.
+    validation_split: int, optional
+        indicates the portion of train data that the algorithm will split
+        for form the validation data. it can be used to find the best value
+        for hyper parameters such as embedding size of hidden layer size.
+        The default value is zero and algorithm does not split any data.
+
+    Methods
+    -------
+    set_data(train, test, valid)
+        a setter for train, test, and validation data
+        data must be in the form of user,item,rate
+    set_neural_model(model)
+        a setter for the neural model
+    read_data(dataset_address)
+        reads either movielens 100k or movielens 1m from disk. If you want
+        to use algorithm on other datasets, you can read it yourself and
+        use set_data() method to set it.
+    capture_representaions(pco_matrix=None, dictionary=None)
+        uses other methods to capture representations and also user rate
+        averages
+    fit_MF(pco_matrix = None, dictionary = None)
+        factorizes item-item pco matrix.
+    fit_user_user_MF(pco_matrix = None, dictionary = None)
+        factorizes user-user pco matrix and returns representations
+    _get_item_vector(item)
+        a getter for item representation
+    _get_user_vector(user)
+        a getter for user representation
+    _calculate_user_averages(data)
+        calculate and returns user averages
+    _infer_user_vector(data, user_averages)
+        infers user representations based on its items. returns array of
+        user representations. used when pco matrix is item-item
+    _infer_item_vector(data)
+        infers item representations based on its user. returns array of
+        item representations. used when pco matrix is user-user
+    simple_mlp(data)
+        builds and trains neural netowrk model
+    _get_data_for_neural_model(data)
+        provides data to train neural network
+    predict_top_n(data, user, n)
+        predicts top n recommendations for the given user by using the
+        neural model
+    predict_top_n_using_KNI(data, user, n)
+        predicts top n recommendations for give user by using nearest
+        movies in the given users based on their representations
+    _euclidean_similarity(v1, v2)
+        returns euclidean similarity between two vectors
+    _cosin_similarity(v1, v2)
+        returns cosinus similarity between two vectors
+    calculate_NDCG(data, user, top_ranked, n)
+        calculates and returns NDCG for the given user
+    dcg(l)
+        returns dcg of the given list
+    calc(user, data,  n, predictor)
+
+    average_NDCG(data,  n, predictor)
+        calculates and returns the average NDCG of all users
+    calculate_model_acc(data)
+        calculates neural network accuracy
+
+    """
 
     def __init__(self, UPL , embedding_size, hidden_layer_size,
                                             users_size,
                                             epoch_number,
                                             user_user = False,
                                             validation_split = 0):
-
+        self.embedding_size = embedding_size
         self.validation_split = validation_split
         self.upl = UPL
         self.user_user = user_user
@@ -104,27 +188,24 @@ class GEMRank():
         print("Test Items : %s" % len(set(test_items)))
         self.set_data(train_data, test_data , validation_data)
 
-    def capture_representaions(self, embedding_size,
-                                    pco_matrix=None,
-                                    dictionary=None ):
+    def capture_representaions(self, pco_matrix=None,
+                                     dictionary=None ):
 
         if self.user_user:
             self.MF_model, self.MF_dictionary = self.fit_user_user_MF(
-                                                            embedding_size,
                                                             pco_matrix,
                                                             dictionary)
         else:
-            self.MF_model, self.MF_dictionary = self.fit_MF(embedding_size,
-                                                            pco_matrix,
+            self.MF_model, self.MF_dictionary = self.fit_MF(pco_matrix,
                                                             dictionary)
 
-        self.user_averages = self.calculate_user_averages(self.train_data)
+        self.user_averages = self._calculate_user_averages(self.train_data)
         if self.user_user:
-            self.item_vectors = self.infer_item_vectors(self.train_data)
+            self.item_vectors = self._infer_item_vectors(self.train_data)
         else:
-            self.user_vectors = self.infer_user_vector( self.train_data, self.user_averages)
+            self.user_vectors = self._infer_user_vector( self.train_data, self.user_averages)
 
-    def fit_MF(self, embedding_size, pco_matrix = None, dictionary = None):
+    def fit_MF(self, pco_matrix = None, dictionary = None):
         if not pco_matrix and not dictionary:
             sentences = [[] for x in range(self.users_size)]
             movie_dictionary = {}
@@ -155,14 +236,14 @@ class GEMRank():
         nonzeros =  (pco_matrix > 0).sum()
 
         #this one
-        model = NMF(n_components=embedding_size, init='random', random_state=0, max_iter=1000, tol=2e-4)
+        model = NMF(n_components=self.embedding_size, init='random', random_state=0, max_iter=1000, tol=2e-4)
         W = model.fit_transform(pco_matrix)
         return W  , dictionary
 
        # model = NMF(n_components=EMBEDDING_VOL, init='random', random_state=0)
         #return model.fit_transform(item_item_similarity) +  model.components_.T , dictionary
 
-    def fit_user_user_MF(self, embedding_size, pco_matrix = None, dictionary = None):
+    def fit_user_user_MF(self, pco_matrix = None, dictionary = None):
         if not pco_matrix and not dictionary:
 
             movie_profiles = {}
@@ -192,24 +273,24 @@ class GEMRank():
                     pco_matrix[i,j] = math.log(pco_matrix[i,j] , 2 )
 
 
-        model = NMF(n_components=embedding_size, init='random', random_state=0)
+        model = NMF(n_components=self.embedding_size, init='random', random_state=0)
         W = model.fit_transform(pco_matrix)
 
         return W, dictionary
 
-    def _get_item_vector(self,item):
+    def _get_item_vector(self, item):
         if self.user_user:
             return self.item_vectors[item]
         else:
             return self.MF_model[self.MF_dictionary[item],:]
 
-    def _get_user_vector(self,user):
+    def _get_user_vector(self, user):
         if self.user_user:
             return self.MF_model[self.MF_dictionary[user+1],:]
         else:
             return self.user_vectors[user]
 
-    def calculate_user_averages(self,data):
+    def _calculate_user_averages(self, data):
         user_averages = [ 0 for x in range(self.users_size)]
         user_counts = [ 0 for x in range(self.users_size)]
         for line in data:
@@ -220,7 +301,7 @@ class GEMRank():
                 user_averages[i] /= user_counts[i]
         return user_averages
 
-    def infer_user_vector(self, data, user_averages):
+    def _infer_user_vector(self, data, user_averages):
         user_vectors = []
 
         for i in range(self.users_size):
@@ -237,7 +318,7 @@ class GEMRank():
                 user_vectors.append(0)
         return user_vectors
 
-    def infer_item_vectors(self, data):
+    def _infer_item_vectors(self, data):
         item_vectors = {}
         for line in data:
             item_vectors[line[MOVIE]] = 0
@@ -255,12 +336,12 @@ class GEMRank():
 
         return item_vectors
 
-    def simple_mlp(self, data, embedding_size):
+    def simple_mlp(self, data):
 
-        mlp_data_user, mlp_data_item, targets = self._get_data_for_deep_model(data)
+        mlp_data_user, mlp_data_item, targets = self._get_data_for_neural_model(data)
 
-        user_inputs = Input(shape=(embedding_size,))
-        item_inputs = Input(shape=(embedding_size,))
+        user_inputs = Input(shape=(self.embedding_size,))
+        item_inputs = Input(shape=(self.embedding_size,))
         added = concatenate([user_inputs,item_inputs])
         #dropout1 = Dropout(0.2)(added)
         shared_layer = Dense(self.hidden_layer_size, activation='relu')(added)
@@ -281,7 +362,7 @@ class GEMRank():
 
         self.set_neural_model(model)
 
-    def _get_data_for_deep_model(self, data):
+    def _get_data_for_neural_model(self, data):
         mlp_data_user = []
         mlp_data_item = []
         targets = []
@@ -300,7 +381,7 @@ class GEMRank():
 
         return mlp_data_user ,mlp_data_item , targets
 
-    def predict_top_n(self,data,  user, n):
+    def predict_top_n(self, data, user, n):
         added_movies_to_test_data = []
         user_vector = self._get_user_vector(user)
         mlp_data_user = []
@@ -362,8 +443,9 @@ class GEMRank():
         top_n =  np.flip(top_n , 0)
         return added_movies_to_test_data[top_n]
 
-    def _euclidean_distance(self, v1, v2):
+    def _euclidean_similarity(self, v1, v2):
         return math.sqrt(sum(np.square(v1-v2)))
+
     def _cosin_similarity(self, v1, v2):
         return (1 - spatial.distance.cosine(v1, v2))
 
@@ -394,7 +476,6 @@ class GEMRank():
             dcg += (2**l[idx] - 1) / (math.log( (idx+2) ,2) )
         return dcg
 
-
     def calc(self, user, data,  n, predictor):
 
         top_n = predictor(data, user,n)
@@ -405,8 +486,6 @@ class GEMRank():
             ndcg = self.calculate_NDCG(data, user, top_n, n)
             #print("user %s NDCG is: %s" %(user, ndcg))
             return ndcg
-
-
 
     def average_NDCG(self, data,  n, predictor):
 
