@@ -1,3 +1,3 @@
 # GEMRank
-Python Implementaion of GEMRank algorithm
+Official Python Implementaion of [GEMRank paper](https://arxiv.org/abs/1811.01686)
 
